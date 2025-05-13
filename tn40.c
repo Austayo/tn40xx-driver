@@ -3572,12 +3572,19 @@ static int __init bdx_probe(struct pci_dev *pdev,
 	/*Init PHY */
 	priv->subsystem_vendor = priv->pdev->subsystem_vendor;
 	priv->subsystem_device = priv->pdev->subsystem_device;
-	phy =
-	    bdx_get_phy_by_id(pdev->vendor, pdev->device,
-			      pdev->subsystem_device, 0);
+	phy = bdx_get_phy_by_id(pdev->vendor, pdev->device, pdev->subsystem_device, 0);
 	if (bdx_mdio_reset(priv, 0, phy) == -1) {
 		err = -ENODEV;
 		goto err_out_iomap;
+	}
+
+	// Give time for the SFP module to power up
+	msleep(500); // 500 milliseconds delay — adjust as needed
+
+	// Reinitialize PHY to ensure link detection (optional, if available)
+	if (priv->phy_ops && priv->phy_ops->init) {
+    		dev_info(&pdev->dev, "Reinitializing PHY after delay...\n");
+  		priv->phy_ops->init(priv);
 	}
 
 	bdx_ethtool_ops(ndev);	/* Ethtool interface */
