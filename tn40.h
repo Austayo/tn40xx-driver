@@ -959,3 +959,17 @@ enum PHY_TYPE AQR105_register(struct bdx_priv *priv);
 #endif
 
 #endif /* _TN40XX_H */
+#ifndef HAVE_STRLCPY
+#define HAVE_STRLCPY
+static inline size_t strlcpy(char *dest, const char *src, size_t size)
+{
+    size_t len = strlen(src);
+    if (size > 0)
+    {
+        size_t copy_len = (len >= size) ? size - 1 : len;
+        memcpy(dest, src, copy_len);
+        dest[copy_len] = '\0';
+    }
+    return len;
+}
+#endif
