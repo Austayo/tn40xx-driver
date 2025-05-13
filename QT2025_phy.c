@@ -37,68 +37,76 @@ __init int QT2025_mdio_reset(struct bdx_priv *priv, int port,
 {
 	struct device *dev = &priv->pdev->dev;
 	u16 *phy_fw = QT2025_phy_firmware, j, fwVer01, fwVer2, fwVer3, module;
-	int s_fw, i, a;
+	int s_fw, i, a, retry;
 	int phy_id = 0, rev = 0;
 
-	phy_id = bdx_mdio_read(priv, 1, port, 0xD001);
+	for (retry = 0; retry < 3; retry++) {
+		phy_id = bdx_mdio_read(priv, 1, port, 0xD001);
 
-	switch (0xFF & (phy_id >> 8)) {
-	case 0xb3:
-		rev = 0xd;
-		s_fw = sizeof(QT2025_phy_firmware) / sizeof(u16);
-		break;
+		switch (0xFF & (phy_id >> 8)) {
+		case 0xb3:
+			rev = 0xd;
+			s_fw = sizeof(QT2025_phy_firmware) / sizeof(u16);
+			break;
+		default:
+			dev_err(dev, "PHY ID =0x%x, retrying...\n", (0xFF & (phy_id >> 8)));
+			msleep(200);
+			continue;
+		}
 
-	default:
-		dev_err(dev, "PHY ID =0x%x, returning\n",
-			(0xFF & (phy_id >> 8)));
-		return 1;
-		break;
+		switch (rev) {
+		case 0xD:
+			BDX_MDIO_WRITE(priv, 1, 0xC300, 0x0000);
+			BDX_MDIO_WRITE(priv, 1, 0xC302, 0x4);
+			BDX_MDIO_WRITE(priv, 1, 0xC319, 0x0038);
+
+			BDX_MDIO_WRITE(priv, 1, 0xC31A, 0x0098);
+			BDX_MDIO_WRITE(priv, 3, 0x0026, 0x0E00);
+			BDX_MDIO_WRITE(priv, 3, 0x0027, 0x0893);	/*10G */
+
+			BDX_MDIO_WRITE(priv, 3, 0x0028, 0xA528);
+			BDX_MDIO_WRITE(priv, 3, 0x0029, 0x03);
+			BDX_MDIO_WRITE(priv, 1, 0xC30A, 0x06E1);
+			BDX_MDIO_WRITE(priv, 1, 0xC300, 0x0002);
+			BDX_MDIO_WRITE(priv, 3, 0xE854, 0x00C0);
+
+			for (i = 0, j = 0x8000, a = 3; i < s_fw; i++, j++) {
+				if (i == 0x4000) {
+					a = 4;
+					j = 0x8000;
+				}
+				if (phy_fw[i] < 0x100) {
+					BDX_MDIO_WRITE(priv, a, j, phy_fw[i]);
+				}
+			}
+
+			BDX_MDIO_WRITE(priv, 3, 0xE854, 0x0040);
+			for (i = 60; i; i--) {
+				msleep(50);
+				j = bdx_mdio_read(priv, 3, port, 0xD7FD);
+				if (!(j == 0x10 || j == 0)) {
+					break;
+				}
+			}
+
+			if (!i) {
+				dev_err(dev, "PHY init timeout, retrying...\n");
+				msleep(200);
+				continue;
+			}
+
+			goto success;
+		default:
+			dev_err(dev, "Unknown PHY rev 0x%x, retrying...\n", rev);
+			msleep(200);
+			continue;
+		}
 	}
-	switch (rev) {
-	default:
-		dev_err(dev, "bdx: failed unknown PHY ID %x\n", phy_id);
-		return 1;
-		break;
 
-	case 0xD:
-		BDX_MDIO_WRITE(priv, 1, 0xC300, 0x0000);
-		BDX_MDIO_WRITE(priv, 1, 0xC302, 0x4);
-		BDX_MDIO_WRITE(priv, 1, 0xC319, 0x0038);
+	dev_err(dev, "QT2025 PHY initialization failed after retries\n");
+	return 1;
 
-		BDX_MDIO_WRITE(priv, 1, 0xC31A, 0x0098);
-		BDX_MDIO_WRITE(priv, 3, 0x0026, 0x0E00);
-
-		BDX_MDIO_WRITE(priv, 3, 0x0027, 0x0893);	/*10G */
-
-		BDX_MDIO_WRITE(priv, 3, 0x0028, 0xA528);
-		BDX_MDIO_WRITE(priv, 3, 0x0029, 0x03);
-		BDX_MDIO_WRITE(priv, 1, 0xC30A, 0x06E1);
-		BDX_MDIO_WRITE(priv, 1, 0xC300, 0x0002);
-		BDX_MDIO_WRITE(priv, 3, 0xE854, 0x00C0);
-
-		/* Dump firmware starting at address 3.8000 */
-		for (i = 0, j = 0x8000, a = 3; i < s_fw; i++, j++) {
-			if (i == 0x4000) {
-				a = 4;
-				j = 0x8000;
-			}
-			if (phy_fw[i] < 0x100) {
-				BDX_MDIO_WRITE(priv, a, j, phy_fw[i]);
-			}
-		}
-		BDX_MDIO_WRITE(priv, 3, 0xE854, 0x0040);
-		for (i = 60; i; i--) {
-			msleep(50);
-			j = bdx_mdio_read(priv, 3, port, 0xD7FD);
-			if (!(j == 0x10 || j == 0)) {
-				break;
-			}
-		}
-		if (!i) {
-			dev_err(dev, "PHY init error\n");
-		}
-		break;
-	}
+success:
 	fwVer01 = bdx_mdio_read(priv, 3, port, 0xD7F3);
 	fwVer2 = bdx_mdio_read(priv, 3, port, 0xD7F4);
 	fwVer3 = bdx_mdio_read(priv, 3, port, 0xD7F5);
@@ -107,14 +115,14 @@ __init int QT2025_mdio_reset(struct bdx_priv *priv, int port,
 	dev_info(dev,
 		 "QT2025 FW version %d.%d.%d.%d module type 0x%x\n",
 		 ((fwVer01 >> 4) & 0xf), (fwVer01 & 0xf), (fwVer2 & 0xff),
-		 (fwVer3 & 0xff), (u32) (module & 0xff));
+		 (fwVer3 & 0xff), (u32)(module & 0xff));
 
 	priv->link_speed = QT2025_get_link_speed(priv);
 	bdx_speed_set(priv, priv->link_speed);
 
 	return 0;
-
 }
+
 
 /*
  * Module types:
